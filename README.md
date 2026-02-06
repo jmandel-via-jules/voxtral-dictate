@@ -256,5 +256,5 @@ test.go              — File-based test harness
 mock_server.go       — Standalone mock HTTP STT server (go run)
 config.example.toml  — Annotated example configuration
 systemd/             — Service unit files
-docs/                — Design docs and research
+book/                — Documentation site (mdBook)
 ```

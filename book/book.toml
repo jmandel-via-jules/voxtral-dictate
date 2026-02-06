@@ -1,0 +1,16 @@
+[book]
+authors = ["jmandel-via-jules"]
+language = "en"
+src = "src"
+title = "voxtral-dictate"
+description = "System-wide speech-to-text dictation for Linux using Mistral Voxtral models"
+
+[build]
+build-dir = "out"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/jmandel-via-jules/voxtral-dictate"
+edit-url-template = "https://github.com/jmandel-via-jules/voxtral-dictate/edit/main/book/src/{path}"
+no-section-label = true
