@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log"
@@ -60,15 +61,20 @@ func (b *LlamaCppBackend) Transcribe(ctx context.Context, audioCh <-chan []byte,
 }
 
 func (b *LlamaCppBackend) sendChunk(ctx context.Context, pcm []byte, textCh chan<- string) {
-	audioB64 := base64.StdEncoding.EncodeToString(pcm)
+	// Build a minimal WAV header around the raw PCM so llama.cpp can decode it
+	wavData := pcmToWAV(pcm, b.sampleRate)
+	audioB64 := base64.StdEncoding.EncodeToString(wavData)
 
 	reqBody := map[string]any{
 		"messages": []map[string]any{{
 			"role": "user",
 			"content": []map[string]any{
 				{
-					"type":        "input_audio",
-					"input_audio": audioB64,
+					"type": "input_audio",
+					"input_audio": map[string]any{
+						"data":   audioB64,
+						"format": "wav",
+					},
 				},
 				{
 					"type": "text",
@@ -122,4 +128,24 @@ func (b *LlamaCppBackend) sendChunk(ctx context.Context, pcm []byte, textCh chan
 			}
 		}
 	}
+}
+
+// pcmToWAV wraps raw PCM s16le mono data in a minimal WAV header.
+func pcmToWAV(pcm []byte, sampleRate int) []byte {
+	var buf bytes.Buffer
+	dataLen := uint32(len(pcm))
+	buf.WriteString("RIFF")
+	binary.Write(&buf, binary.LittleEndian, uint32(36+dataLen))
+	buf.WriteString("WAVEfmt ")
+	binary.Write(&buf, binary.LittleEndian, uint32(16))    // chunk size
+	binary.Write(&buf, binary.LittleEndian, uint16(1))     // PCM
+	binary.Write(&buf, binary.LittleEndian, uint16(1))     // mono
+	binary.Write(&buf, binary.LittleEndian, uint32(sampleRate))
+	binary.Write(&buf, binary.LittleEndian, uint32(sampleRate*2)) // byte rate
+	binary.Write(&buf, binary.LittleEndian, uint16(2))     // block align
+	binary.Write(&buf, binary.LittleEndian, uint16(16))    // bits per sample
+	buf.WriteString("data")
+	binary.Write(&buf, binary.LittleEndian, dataLen)
+	buf.Write(pcm)
+	return buf.Bytes()
 }

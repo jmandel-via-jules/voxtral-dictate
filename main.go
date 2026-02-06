@@ -8,7 +8,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: dictate <daemon|toggle>\n")
+		fmt.Fprintf(os.Stderr, "usage: dictate <daemon|toggle|test FILE>\n")
 		os.Exit(1)
 	}
 
@@ -19,6 +19,13 @@ func main() {
 	case "toggle":
 		cfg := mustLoadConfig()
 		runToggle(cfg)
+	case "test":
+		if len(os.Args) < 3 {
+			fmt.Fprintf(os.Stderr, "usage: dictate test FILE.pcm\n")
+			os.Exit(1)
+		}
+		cfg := mustLoadConfig()
+		runTest(cfg, os.Args[2])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)

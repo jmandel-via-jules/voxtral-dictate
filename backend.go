@@ -18,8 +18,15 @@ func NewBackend(cfg *Config) (Backend, error) {
 		return NewWebSocketBackend(
 			"wss://api.mistral.ai/v1/realtime",
 			cfg.Backend.MistralRT.Model,
-			cfg.Backend.MistralRT.APIKey,
+			mustGetMistralAPIKey(cfg),
 			cfg.Audio.SampleRate,
+		), nil
+	case "mistral-batch":
+		return NewMistralBatchBackend(
+			mustGetMistralAPIKey(cfg),
+			"voxtral-mini-latest",
+			cfg.Audio.SampleRate,
+			5, // 5 second chunks
 		), nil
 	case "vllm-realtime":
 		return NewWebSocketBackend(
@@ -34,6 +41,8 @@ func NewBackend(cfg *Config) (Backend, error) {
 			cfg.Audio.SampleRate,
 			cfg.Backend.LlamaCpp.ChunkSeconds,
 		), nil
+	case "mock":
+		return NewMockBackend(cfg.Audio.SampleRate), nil
 	default:
 		return nil, fmt.Errorf("unknown backend: %q", cfg.Backend.Name)
 	}
