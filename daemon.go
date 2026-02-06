@@ -48,6 +48,7 @@ func runDaemon(cfg *Config) {
 		<-sigCh
 		log.Println("Shutting down...")
 		d.stopDictation()
+		d.typist.Close()
 		ln.Close()
 	}()
 

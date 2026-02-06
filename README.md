@@ -201,6 +201,42 @@ export MISTRAL_API_KEY="your-key-here"
 
 Set `backend.name = "mistral-realtime"` for streaming or `"mistral-batch"` for chunked.
 
+## i3 Integration
+
+Add to `~/.config/i3/config`:
+
+```bash
+# Start dictate daemon on login
+exec --no-startup-id /path/to/dictate daemon
+
+# Toggle dictation with $mod+` (backtick)
+bindsym $mod+grave exec --no-startup-id /path/to/dictate toggle
+```
+
+### Status bar indicator (bumblebee-status)
+
+A bumblebee-status module is included in `contrib/`. It shows **REC** in red
+when dictation is active, and is blank otherwise.
+
+```bash
+cp contrib/bumblebee-dictate.py ~/.config/bumblebee-status/modules/dictate.py
+```
+
+Then add `dictate` to your module list:
+
+```
+status_command bumblebee-status -m dictate memory pasink date time battery ...
+```
+
+The module queries the daemon's Unix socket (`/tmp/dictate.sock`) every second,
+so there's no polling overhead when the daemon isn't running.
+
+### ydotool note
+
+If you use `method = "ydotool"` for text injection, the daemon will
+automatically start `ydotoold` if it isn't already running, and stop it on
+daemon exit (only if the daemon started it). No separate setup needed.
+
 ## systemd Units
 
 Sample units in `systemd/`:

@@ -80,7 +80,7 @@ See **[Model Reference](models.md)** for full quant matrix and download links.
 | Method | Works on | Notes |
 |---|---|---|
 | `xdotool` | X11 (i3, etc.) | Most reliable for X11. Default. |
-| `ydotool` | X11 + Wayland | Universal. Needs `ydotoold` daemon. |
+| `ydotool` | X11 + Wayland | Universal. `ydotoold` auto-managed by daemon. |
 | `wtype` | Wayland (wlroots) | Sway, Hyprland only. |
 | `dotool` | X11 + Wayland | Universal alternative. |
 

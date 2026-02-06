@@ -16,7 +16,7 @@ func NewBackend(cfg *Config) (Backend, error) {
 	switch cfg.Backend.Name {
 	case "mistral-realtime":
 		return NewWebSocketBackend(
-			"wss://api.mistral.ai/v1/realtime",
+			"wss://api.mistral.ai/v1/audio/transcriptions/realtime?model="+cfg.Backend.MistralRT.Model,
 			cfg.Backend.MistralRT.Model,
 			mustGetMistralAPIKey(cfg),
 			cfg.Audio.SampleRate,

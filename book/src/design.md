@@ -101,6 +101,21 @@ API and local vLLM Realtime.
 **Why:** They use the same protocol (Mistral designed it, vLLM implemented it).
 Only difference is the URL and auth header.
 
+**Protocol:** Connect to `wss://api.mistral.ai/v1/audio/transcriptions/realtime?model=...`,
+wait for `session.created`, send `session.update` with `audio_format`
+(encoding + sample_rate), then stream audio via `input_audio.append` messages
+(base64-encoded PCM). Receive `transcription.text.delta` events with incremental
+text. Send `input_audio.end` when done.
+
+### 8. ydotoold lifecycle management
+
+**Decision:** When `typing.method = "ydotool"`, the daemon auto-starts `ydotoold`
+if it isn't already running, and kills it on shutdown (only if we started it).
+
+**Why:** ydotool requires a running daemon (`ydotoold`) for uinput access. Rather
+than requiring users to set up a separate service, the dictate daemon manages it
+transparently. If ydotoold is already running (e.g. via systemd), we leave it alone.
+
 ## Data Flow
 
 ```
@@ -140,7 +155,7 @@ API key: `MISTRAL_API_KEY` env var overrides config file `api_key` field.
 | Method | Mechanism | Latency | Unicode | Limitations |
 |---|---|---|---|---|
 | xdotool | X11 XTest extension | ~1ms/char | Good | X11 only, modifier key issues |
-| ydotool | Linux uinput (kernel) | ~1ms/char | Good | Needs ydotoold + input group |
+| ydotool | Linux uinput (kernel) | ~1ms/char | Good | Needs ydotoold (auto-managed) + input group |
 | wtype | Wayland virtual-keyboard | ~1ms/char | Good | wlroots compositors only |
 | dotool | Linux uinput | ~1ms/char | Good | Needs uinput access |
 
@@ -153,7 +168,8 @@ the full chunk (several seconds of speech at once).
 - **Voice Activity Detection (VAD):** Add Silero VAD or energy-based detection
   so the llamacpp backend only sends audio that contains speech
 - **Audio feedback:** Play a short beep/tone on toggle to confirm start/stop
-- **i3bar/waybar integration:** Show dictation status in the status bar
+- **i3bar/waybar integration:** ~~Show dictation status in the status bar~~
+  Done — see `contrib/bumblebee-dictate.py` for bumblebee-status module
 - **Streaming for llamacpp:** llama.cpp may eventually get a proper
   /v1/audio/transcriptions endpoint (GitHub issue #15291)
 - **Voxtral Realtime in llama.cpp:** The Realtime 4B model currently only

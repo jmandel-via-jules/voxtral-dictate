@@ -13,7 +13,6 @@ import (
 )
 
 // WebSocketBackend works with both Mistral Realtime API and local vLLM Realtime.
-// They use the same WebSocket protocol.
 type WebSocketBackend struct {
 	url        string
 	model      string
@@ -28,27 +27,6 @@ func NewWebSocketBackend(url, model, apiKey string, sampleRate int) *WebSocketBa
 		apiKey:     apiKey,
 		sampleRate: sampleRate,
 	}
-}
-
-type wsSessionUpdate struct {
-	Type    string    `json:"type"`
-	Session wsSession `json:"session"`
-}
-
-type wsSession struct {
-	Model      string        `json:"model"`
-	InputFmt   wsAudioFormat `json:"input_audio_format"`
-	Temperature float64      `json:"temperature"`
-}
-
-type wsAudioFormat struct {
-	Encoding   string `json:"encoding"`
-	SampleRate int    `json:"sample_rate"`
-}
-
-type wsAudioAppend struct {
-	Type  string `json:"type"`
-	Audio string `json:"audio"`
 }
 
 type wsEvent struct {
@@ -73,27 +51,38 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 	// Increase read limit for large responses
 	conn.SetReadLimit(10 * 1024 * 1024)
 
-	// Send session config
-	err = wsjson.Write(ctx, conn, wsSessionUpdate{
-		Type: "session.update",
-		Session: wsSession{
-			Model:       b.model,
-			InputFmt:    wsAudioFormat{Encoding: "pcm_s16le", SampleRate: b.sampleRate},
-			Temperature: 0.0,
+	// Wait for session.created from server
+	var initEv wsEvent
+	if err := wsjson.Read(ctx, conn, &initEv); err != nil {
+		return fmt.Errorf("ws read session.created: %w", err)
+	}
+	log.Printf("WebSocket connected to %s (model=%s, init=%s)", b.url, b.model, initEv.Type)
+
+	// Tell server our audio format
+	sessionUpdate, _ := json.Marshal(map[string]any{
+		"type": "session.update",
+		"session": map[string]any{
+			"audio_format": map[string]any{
+				"encoding":    "pcm_s16le",
+				"sample_rate": b.sampleRate,
+			},
 		},
 	})
-	if err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, sessionUpdate); err != nil {
 		return fmt.Errorf("ws session update: %w", err)
 	}
-
-	log.Printf("WebSocket connected to %s (model=%s)", b.url, b.model)
 
 	// Send audio in background
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	go func() {
-		defer cancel()
+		defer func() {
+			// Signal end of audio
+			msg, _ := json.Marshal(map[string]string{"type": "input_audio.end"})
+			conn.Write(ctx2, websocket.MessageText, msg)
+			cancel()
+		}()
 		for {
 			select {
 			case <-ctx2.Done():
@@ -103,12 +92,11 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 					return
 				}
 				b64 := base64.StdEncoding.EncodeToString(chunk)
-				msg := wsAudioAppend{
-					Type:  "input_audio_buffer.append",
-					Audio: b64,
-				}
-				data, _ := json.Marshal(msg)
-				if err := conn.Write(ctx2, websocket.MessageText, data); err != nil {
+				msg, _ := json.Marshal(map[string]string{
+					"type":  "input_audio.append",
+					"audio": b64,
+				})
+				if err := conn.Write(ctx2, websocket.MessageText, msg); err != nil {
 					log.Printf("ws write error: %v", err)
 					return
 				}
@@ -118,13 +106,17 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 
 	// Read text events
 	for {
-		var ev wsEvent
-		err := wsjson.Read(ctx2, conn, &ev)
+		_, data, err := conn.Read(ctx2)
 		if err != nil {
 			if ctx2.Err() != nil {
 				return nil // normal shutdown
 			}
 			return fmt.Errorf("ws read: %w", err)
+		}
+		var ev wsEvent
+		if err := json.Unmarshal(data, &ev); err != nil {
+			log.Printf("ws unmarshal: %v", err)
+			continue
 		}
 		switch ev.Type {
 		case "transcription.text.delta":
@@ -135,6 +127,8 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 					return nil
 				}
 			}
+		case "transcription.done":
+			return nil
 		case "error":
 			log.Printf("ws error event: %+v", ev)
 		}
