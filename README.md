@@ -1,38 +1,260 @@
 # voxtral-dictate
 
-System-wide speech-to-text dictation for Linux (i3/sway/X11/Wayland).
+System-wide speech-to-text dictation for Linux. A single Go binary runs as a
+long-running daemon (near-zero idle CPU) and a toggle client. Press a hotkey,
+speak, press again to stop. Text appears wherever your cursor is.
 
-A single Go binary acts as both the long-running daemon and the toggle client.
-The daemon idles with near-zero CPU until toggled, then captures mic audio,
-streams it to a Voxtral STT backend (local or cloud), and injects transcribed
-text as keystrokes into the focused window.
+Built for i3/Sway/X11/Wayland. Supports Mistral's Voxtral models — both local
+(llama.cpp, vLLM) and cloud (Mistral API).
 
 ## Quick Start
 
 ```bash
+# Build
 go build -o dictate .
-cp config.example.toml ~/.config/dictate/config.toml
-# edit config to choose backend + typing method
 
-# Start daemon
+# Configure
+mkdir -p ~/.config/dictate
+cp config.example.toml ~/.config/dictate/config.toml
+# Edit config.toml — see detailed comments inside
+
+# Start a model server (pick one, see "Model Servers" below)
+# Then start the daemon:
 ./dictate daemon &
 
-# Toggle dictation on/off
-./dictate toggle
+# Test toggle:
+./dictate toggle   # → "started" (recording + transcribing)
+./dictate toggle   # → "stopped"
 
-# i3 config:
-#   bindsym $mod+d exec ~/dictate toggle
+# Add to i3 config (~/.config/i3/config):
+bindsym $mod+d exec /path/to/dictate toggle
+
+# Or run as a systemd user service:
+cp systemd/dictate.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now dictate
 ```
 
-## Backends
+## Architecture
 
-- **mistral-realtime** — Mistral API WebSocket streaming ($0.006/min)
-- **vllm-realtime** — Local vLLM serving Voxtral Realtime 4B
-- **llamacpp** — Local llama.cpp with Voxtral Mini 3B GGUF (chunk-based)
+```
+i3 keybinding
+    │
+    ▼
+┌──────────┐   Unix socket    ┌─────────────────────────────────┐
+│ dictate   │──── toggle ────▶│ dictate daemon (always running)  │
+│ toggle    │◀── started ─────│                                  │
+└──────────┘                  │  ┌──────────┐                    │
+                              │  │ Recorder │ pw-record/arecord  │
+                              │  │ (PCM)    │ subprocess pipe    │
+                              │  └────┬─────┘                    │
+                              │       │ []byte chunks            │
+                              │  ┌────▼──────┐                   │
+                              │  │ Backend   │ WebSocket / HTTP  │
+                              │  │ (STT)     │ to model server   │
+                              │  └────┬──────┘                   │
+                              │       │ text fragments           │
+                              │  ┌────▼──────┐                   │
+                              │  │ Typist    │ xdotool/wtype/etc │
+                              │  │ (inject)  │ into focused app  │
+                              │  └───────────┘                   │
+                              └─────────────────────────────────┘
+```
 
-## Typing Methods
+**Key design decisions:**
+- Single binary for both daemon and client (subcommands: `daemon`, `toggle`, `test`)
+- Unix socket IPC — instant toggle, no HTTP port, no conflicts
+- No CGo — audio captured via `pw-record` or `arecord` subprocess (pipe stdout)
+- Model server is separate — always-resident with weights hot in VRAM/RAM
+- Daemon is idle at ~5MB RSS until toggled, then spawns goroutines for the session
 
-- **xdotool** — X11 (default for i3)
-- **ydotool** — Universal (X11 + Wayland), needs ydotoold
-- **wtype** — Wayland wlroots (Sway, Hyprland)
-- **dotool** — Universal alternative
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `dictate daemon` | Start the long-running daemon (listens on Unix socket) |
+| `dictate toggle` | Toggle dictation on/off (sends command to daemon) |
+| `dictate test FILE.pcm` | Feed a raw PCM s16le file through the pipeline to stdout |
+
+## Configuration
+
+Config lives at `~/.config/dictate/config.toml` (override with `DICTATE_CONFIG` env var).
+
+See `config.example.toml` for the full annotated config. Key sections:
+
+### `[audio]`
+```toml
+sample_rate = 16000   # Must be 16000 for Voxtral
+chunk_ms = 480        # Audio chunk size (480ms recommended for Realtime)
+device = ""           # ALSA/PipeWire device name; empty = system default mic
+```
+
+### `[typing]`
+```toml
+method = "xdotool"    # How to inject text into the focused window
+```
+
+| Method | Works on | Notes |
+|---|---|---|
+| `xdotool` | X11 (i3, etc.) | Most reliable for X11. Default. |
+| `ydotool` | X11 + Wayland | Universal. Needs `ydotoold` daemon + `input` group. |
+| `wtype` | Wayland (wlroots) | Sway, Hyprland only. Best Wayland option for wlroots. |
+| `dotool` | X11 + Wayland | Universal alternative to ydotool. |
+
+### `[backend]`
+```toml
+name = "llamacpp"     # Which STT backend to use
+```
+
+| Backend | Latency | Needs | Cost |
+|---|---|---|---|
+| `mistral-realtime` | <500ms streaming | Internet + API key | $0.006/min |
+| `mistral-batch` | 2-5s per chunk | Internet + API key | $0.003/min |
+| `vllm-realtime` | <500ms streaming | Local GPU ≥16GB | Free |
+| `llamacpp` | 2-5s per chunk | Local GPU or CPU | Free |
+| `mock` | Instant (fake) | Nothing | For testing |
+
+## Model Servers
+
+The dictate daemon does **not** run the model. It connects to a separately-running
+model server. This is intentional — model loading is slow (10-30s), so you want
+the server always-resident with weights hot.
+
+### Option A: llama.cpp + Voxtral Mini 3B (easiest local)
+
+Smallest footprint. Runs on CPU (slow) or any GPU with ≥3GB VRAM.
+
+```bash
+# Download model + audio encoder
+huggingface-cli download bartowski/mistralai_Voxtral-Mini-3B-2507-GGUF \
+    mistralai_Voxtral-Mini-3B-2507-Q4_K_M.gguf --local-dir ~/models
+huggingface-cli download ggml-org/Voxtral-Mini-3B-2507-GGUF \
+    mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf --local-dir ~/models
+
+# Run (GPU accelerated with -ngl 99; omit for CPU-only)
+llama-server \
+    -m ~/models/mistralai_Voxtral-Mini-3B-2507-Q4_K_M.gguf \
+    --mmproj ~/models/mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf \
+    --host 127.0.0.1 --port 8080 -ngl 99
+```
+
+Available quants (from bartowski):
+| Quant | Size | Quality | Min VRAM |
+|---|---|---|---|
+| Q8_0 | 4.3GB | Near-lossless | ~6GB |
+| Q6_K | 3.3GB | Excellent | ~5GB |
+| **Q4_K_M** | **2.5GB** | **Good (recommended)** | **~4GB** |
+| IQ3_M | 2.0GB | Acceptable | ~3GB |
+| IQ2_M | 1.6GB | Usable | ~3GB |
+
+Plus ~700MB for the mmproj audio encoder (always Q8).
+
+### Option B: llama.cpp + Voxtral Small 24B (best local quality)
+
+Needs a 24GB+ VRAM GPU (RTX 4090, A5000, etc.) for Q4_K_M.
+
+```bash
+huggingface-cli download bartowski/mistralai_Voxtral-Small-24B-2507-GGUF \
+    mistralai_Voxtral-Small-24B-2507-Q4_K_M.gguf --local-dir ~/models
+# Get matching mmproj from ggml-org or bartowski
+
+llama-server \
+    -m ~/models/mistralai_Voxtral-Small-24B-2507-Q4_K_M.gguf \
+    --mmproj ~/models/mmproj-Voxtral-Small-24B-2507-Q8_0.gguf \
+    --host 127.0.0.1 --port 8080 -ngl 99
+```
+
+### Option C: vLLM + Voxtral Realtime 4B (true streaming)
+
+Best local experience. True streaming transcription with <500ms latency.
+Requires ≥16GB VRAM GPU and vLLM nightly.
+
+```bash
+uv pip install -U vllm --torch-backend=auto \
+    --extra-index-url https://wheels.vllm.ai/nightly
+uv pip install soxr librosa soundfile
+
+VLLM_DISABLE_COMPILE_CACHE=1 vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+    --host 127.0.0.1 --port 8000 \
+    --compilation_config '{"cudagraph_mode": "PIECEWISE"}'
+```
+
+Set `backend.name = "vllm-realtime"` in config.
+
+### Option D: vLLM + Voxtral Small 24B
+
+Best overall quality via vLLM. Needs ~55GB VRAM (bf16) or ~28GB (FP8).
+
+```bash
+vllm serve mistralai/Voxtral-Small-24B-2507 \
+    --tokenizer_mode mistral --config_format mistral --load_format mistral \
+    --tensor-parallel-size 2 --host 127.0.0.1 --port 8000
+```
+
+### Option E: Mistral Cloud API (no local GPU needed)
+
+Just set your API key:
+```bash
+export MISTRAL_API_KEY="your-key-here"
+# or set api_key in config.toml under [backend.mistral-realtime]
+```
+
+Set `backend.name = "mistral-realtime"` for streaming or `"mistral-batch"` for chunked.
+
+## systemd Units
+
+Sample units in `systemd/`:
+
+| File | Purpose |
+|---|---|
+| `dictate.service` | The dictation daemon itself |
+| `llamacpp.service` | llama.cpp model server (edit for model size) |
+| `vllm-voxtral.service` | vLLM model server (edit for model variant) |
+
+Install as system services:
+```bash
+sudo cp systemd/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now llamacpp   # or vllm-voxtral
+sudo systemctl enable --now dictate
+```
+
+Or as user services:
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/*.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now llamacpp
+systemctl --user enable --now dictate
+```
+
+## Testing
+
+```bash
+# Test with mock backend (no model needed)
+echo '[backend]\nname = "mock"' > /tmp/test.toml
+DICTATE_CONFIG=/tmp/test.toml ./dictate test some_audio.pcm
+
+# Create test audio from any media file:
+ffmpeg -i input.mp3 -ar 16000 -ac 1 -f s16le output.pcm
+```
+
+## Source Layout
+
+```
+main.go              — CLI entry point (daemon | toggle | test)
+config.go            — TOML config loading with defaults
+daemon.go            — Unix socket listener, session lifecycle
+audio.go             — Mic capture via pw-record/arecord subprocess
+typist.go            — Text injection (xdotool/ydotool/wtype/dotool)
+backend.go           — Backend interface + factory
+backend_ws.go        — WebSocket backend (Mistral Realtime + vLLM Realtime)
+backend_mistral_batch.go — Mistral HTTP batch transcription
+backend_llamacpp.go  — llama.cpp HTTP chat completions with audio
+backend_mock.go      — Fake backend for testing
+test.go              — File-based test harness
+mock_server.go       — Standalone mock HTTP STT server (go run)
+config.example.toml  — Annotated example configuration
+systemd/             — Service unit files
+docs/                — Design docs and research
+```
