@@ -1,14 +1,28 @@
 [Unit]
-Description=vLLM serving Voxtral Realtime 4B
+Description=vLLM serving Voxtral
 After=network.target
 
 [Service]
 Type=simple
 User=exedev
 Environment=VLLM_DISABLE_COMPILE_CACHE=1
+
+# --- Voxtral Realtime 4B (streaming, >=16GB VRAM) ---
 ExecStart=/usr/local/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
     --host 127.0.0.1 --port 8000 \
     --compilation_config '{"cudagraph_mode": "PIECEWISE"}'
+
+# --- Voxtral Small 24B (best quality, ~55GB VRAM bf16 or ~28GB FP8) ---
+# Uncomment below, comment out Realtime above:
+#ExecStart=/usr/local/bin/vllm serve mistralai/Voxtral-Small-24B-2507 \
+#    --tokenizer_mode mistral --config_format mistral --load_format mistral \
+#    --tensor-parallel-size 2 --host 127.0.0.1 --port 8000
+
+# --- Voxtral Mini 3B (lighter, ~10GB VRAM) ---
+#ExecStart=/usr/local/bin/vllm serve mistralai/Voxtral-Mini-3B-2507 \
+#    --tokenizer_mode mistral --config_format mistral --load_format mistral \
+#    --host 127.0.0.1 --port 8000
+
 Restart=on-failure
 RestartSec=10
 

@@ -1,15 +1,33 @@
 [Unit]
-Description=llama.cpp server with Voxtral Mini 3B
+Description=llama.cpp server with Voxtral
 After=network.target
 
 [Service]
 Type=simple
 User=exedev
-# Adjust model path and quant to taste
+
+# --- Voxtral Mini 3B (small, runs on CPU or any GPU) ---
+# Download:
+#   huggingface-cli download bartowski/mistralai_Voxtral-Mini-3B-2507-GGUF \
+#     mistralai_Voxtral-Mini-3B-2507-Q4_K_M.gguf --local-dir /opt/models
+#   huggingface-cli download ggml-org/Voxtral-Mini-3B-2507-GGUF \
+#     mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf --local-dir /opt/models
 ExecStart=/usr/local/bin/llama-server \
-    -hf bartowski/mistralai_Voxtral-Mini-3B-2507-GGUF \
-    -hff Voxtral-Mini-3B-2507-Q4_K_M.gguf \
-    --host 127.0.0.1 --port 8080
+    -m /opt/models/mistralai_Voxtral-Mini-3B-2507-Q4_K_M.gguf \
+    --mmproj /opt/models/mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf \
+    --host 127.0.0.1 --port 8080 -ngl 99
+
+# --- Voxtral Small 24B (best quality, needs 24GB+ VRAM with Q4_K_M) ---
+# Download:
+#   huggingface-cli download bartowski/mistralai_Voxtral-Small-24B-2507-GGUF \
+#     mistralai_Voxtral-Small-24B-2507-Q4_K_M.gguf --local-dir /opt/models
+#   (mmproj from ggml-org or bartowski)
+# Uncomment below and comment out Mini above:
+#ExecStart=/usr/local/bin/llama-server \
+#    -m /opt/models/mistralai_Voxtral-Small-24B-2507-Q4_K_M.gguf \
+#    --mmproj /opt/models/mmproj-Voxtral-Small-24B-2507-Q8_0.gguf \
+#    --host 127.0.0.1 --port 8080 -ngl 99
+
 Restart=on-failure
 RestartSec=5
 

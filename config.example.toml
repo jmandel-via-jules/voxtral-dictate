@@ -6,18 +6,27 @@ socket = "/tmp/dictate.sock"
 [audio]
 sample_rate = 16000
 chunk_ms = 480        # 480ms chunks (recommended for Voxtral Realtime)
-device = ""           # ALSA device; empty = default
+device = ""           # ALSA/PipeWire device; empty = default
 
 [typing]
 method = "xdotool"   # xdotool | ydotool | wtype | dotool
 
-# Choose one backend by name
+# Choose one backend by name:
+#   mistral-realtime  — Mistral cloud WebSocket streaming (best quality, needs internet)
+#   mistral-batch     — Mistral cloud HTTP chunked (simpler, higher latency)
+#   vllm-realtime     — Local vLLM streaming (needs >=16GB VRAM GPU)
+#   llamacpp          — Local llama.cpp (runs on CPU, any GGUF quant)
 [backend]
-name = "mistral-realtime"
+name = "llamacpp"
 
 [backend.mistral-realtime]
 api_key = ""         # or set MISTRAL_API_KEY env var
 model = "voxtral-mini-transcribe-realtime-2602"
+
+[backend.mistral-batch]
+api_key = ""
+model = "voxtral-mini-latest"
+chunk_seconds = 5
 
 [backend.vllm-realtime]
 url = "ws://localhost:8000/v1/realtime"
@@ -26,3 +35,36 @@ model = "mistralai/Voxtral-Mini-4B-Realtime-2602"
 [backend.llamacpp]
 url = "http://localhost:8080/v1/chat/completions"
 chunk_seconds = 3    # accumulate audio then send
+
+# --- Model server setup (not managed by dictate, run separately) ---
+#
+# OPTION A: Voxtral Mini 3B via llama.cpp (smallest, runs on CPU or weak GPU)
+#   Recommended quants:
+#     Q4_K_M (2.5GB) — best quality/size tradeoff
+#     IQ2_M  (1.6GB) — smallest usable
+#     Q8_0   (4.3GB) — near-lossless
+#
+#   llama-server \
+#     -m Voxtral-Mini-3B-2507-Q4_K_M.gguf \
+#     --mmproj mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf \
+#     --host 127.0.0.1 --port 8080
+#
+# OPTION B: Voxtral Small 24B via llama.cpp (best quality, needs 24GB+ GPU)
+#   Recommended quants:
+#     Q4_K_M (14.3GB) — fits RTX 4090
+#     Q6_K   (19.5GB) — high quality
+#
+#   llama-server \
+#     -m Voxtral-Small-24B-2507-Q4_K_M.gguf \
+#     --mmproj mmproj-Voxtral-Small-24B-2507-Q8_0.gguf \
+#     --host 127.0.0.1 --port 8080 -ngl 99
+#
+# OPTION C: Voxtral Realtime 4B via vLLM (true streaming, needs >=16GB VRAM)
+#   vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+#     --host 127.0.0.1 --port 8000 \
+#     --compilation_config '{"cudagraph_mode": "PIECEWISE"}'
+#
+# OPTION D: Voxtral Small 24B via vLLM (best quality, needs ~55GB VRAM or FP8 ~28GB)
+#   vllm serve mistralai/Voxtral-Small-24B-2507 \
+#     --tokenizer_mode mistral --config_format mistral --load_format mistral \
+#     --tensor-parallel-size 2 --host 127.0.0.1 --port 8000
