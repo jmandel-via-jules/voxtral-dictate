@@ -1,0 +1,28 @@
+# voxtral-dictate config — copy to ~/.config/dictate/config.toml
+
+[daemon]
+socket = "/tmp/dictate.sock"
+
+[audio]
+sample_rate = 16000
+chunk_ms = 480        # 480ms chunks (recommended for Voxtral Realtime)
+device = ""           # ALSA device; empty = default
+
+[typing]
+method = "xdotool"   # xdotool | ydotool | wtype | dotool
+
+# Choose one backend by name
+[backend]
+name = "mistral-realtime"
+
+[backend.mistral-realtime]
+api_key = ""         # or set MISTRAL_API_KEY env var
+model = "voxtral-mini-transcribe-realtime-2602"
+
+[backend.vllm-realtime]
+url = "ws://localhost:8000/v1/realtime"
+model = "mistralai/Voxtral-Mini-4B-Realtime-2602"
+
+[backend.llamacpp]
+url = "http://localhost:8080/v1/chat/completions"
+chunk_seconds = 3    # accumulate audio then send

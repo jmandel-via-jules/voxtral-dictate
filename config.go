@@ -1,0 +1,99 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/BurntSushi/toml"
+)
+
+type Config struct {
+	Daemon DaemonConfig           `toml:"daemon"`
+	Audio  AudioConfig            `toml:"audio"`
+	Typing TypingConfig           `toml:"typing"`
+	Backend BackendConfig         `toml:"backend"`
+}
+
+type DaemonConfig struct {
+	Socket string `toml:"socket"`
+}
+
+type AudioConfig struct {
+	SampleRate int    `toml:"sample_rate"`
+	ChunkMs    int    `toml:"chunk_ms"`
+	Device     string `toml:"device"`
+}
+
+type TypingConfig struct {
+	Method string `toml:"method"`
+}
+
+type BackendConfig struct {
+	Name           string              `toml:"name"`
+	MistralRT      MistralRTConfig     `toml:"mistral-realtime"`
+	VllmRT         VllmRTConfig        `toml:"vllm-realtime"`
+	LlamaCpp       LlamaCppConfig      `toml:"llamacpp"`
+}
+
+type MistralRTConfig struct {
+	APIKey string `toml:"api_key"`
+	Model  string `toml:"model"`
+}
+
+type VllmRTConfig struct {
+	URL   string `toml:"url"`
+	Model string `toml:"model"`
+}
+
+type LlamaCppConfig struct {
+	URL          string `toml:"url"`
+	ChunkSeconds int    `toml:"chunk_seconds"`
+}
+
+func defaultConfig() *Config {
+	return &Config{
+		Daemon: DaemonConfig{Socket: "/tmp/dictate.sock"},
+		Audio:  AudioConfig{SampleRate: 16000, ChunkMs: 480},
+		Typing: TypingConfig{Method: "xdotool"},
+		Backend: BackendConfig{
+			Name: "mistral-realtime",
+			MistralRT: MistralRTConfig{
+				Model: "voxtral-mini-transcribe-realtime-2602",
+			},
+			VllmRT: VllmRTConfig{
+				URL:   "ws://localhost:8000/v1/realtime",
+				Model: "mistralai/Voxtral-Mini-4B-Realtime-2602",
+			},
+			LlamaCpp: LlamaCppConfig{
+				URL:          "http://localhost:8080/v1/chat/completions",
+				ChunkSeconds: 3,
+			},
+		},
+	}
+}
+
+func mustLoadConfig() *Config {
+	cfg := defaultConfig()
+
+	// Find config file
+	path := os.Getenv("DICTATE_CONFIG")
+	if path == "" {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, ".config", "dictate", "config.toml")
+	}
+
+	if _, err := os.Stat(path); err == nil {
+		if _, err := toml.DecodeFile(path, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Bad config %s: %v\n", path, err)
+			os.Exit(1)
+		}
+	}
+
+	// Env override for API key
+	if cfg.Backend.MistralRT.APIKey == "" {
+		cfg.Backend.MistralRT.APIKey = os.Getenv("MISTRAL_API_KEY")
+	}
+
+	return cfg
+}

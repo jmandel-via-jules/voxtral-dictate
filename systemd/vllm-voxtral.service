@@ -1,0 +1,16 @@
+[Unit]
+Description=vLLM serving Voxtral Realtime 4B
+After=network.target
+
+[Service]
+Type=simple
+User=exedev
+Environment=VLLM_DISABLE_COMPILE_CACHE=1
+ExecStart=/usr/local/bin/vllm serve mistralai/Voxtral-Mini-4B-Realtime-2602 \
+    --host 127.0.0.1 --port 8000 \
+    --compilation_config '{"cudagraph_mode": "PIECEWISE"}'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

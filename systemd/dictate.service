@@ -1,0 +1,13 @@
+[Unit]
+Description=voxtral-dictate daemon
+After=network.target
+
+[Service]
+Type=simple
+User=exedev
+ExecStart=/home/exedev/dictate/dictate daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

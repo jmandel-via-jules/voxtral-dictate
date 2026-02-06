@@ -1,0 +1,17 @@
+[Unit]
+Description=llama.cpp server with Voxtral Mini 3B
+After=network.target
+
+[Service]
+Type=simple
+User=exedev
+# Adjust model path and quant to taste
+ExecStart=/usr/local/bin/llama-server \
+    -hf bartowski/mistralai_Voxtral-Mini-3B-2507-GGUF \
+    -hff Voxtral-Mini-3B-2507-Q4_K_M.gguf \
+    --host 127.0.0.1 --port 8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
