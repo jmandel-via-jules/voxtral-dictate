@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 )
 
 type Daemon struct {
@@ -138,12 +139,6 @@ func (d *Daemon) runSession(ctx context.Context) {
 		log.Println("Session ended")
 	}()
 
-	backend, err := NewBackend(d.cfg)
-	if err != nil {
-		log.Printf("backend init: %v", err)
-		return
-	}
-
 	rec := NewRecorder(d.cfg.Audio)
 	audioCh, err := rec.Start(ctx)
 	if err != nil {
@@ -151,20 +146,75 @@ func (d *Daemon) runSession(ctx context.Context) {
 		return
 	}
 
-	textCh := make(chan string, 32)
-
-	// Run backend transcription
+	// Fan-out audio: recorder -> backendCh (current backend consumes this)
+	// Buffer ~30s of audio (at 480ms chunks = ~63 chunks) to survive reconnects.
+	backendCh := make(chan []byte, 64)
 	go func() {
-		defer close(textCh)
-		if err := backend.Transcribe(ctx, audioCh, textCh); err != nil {
-			if ctx.Err() == nil {
-				log.Printf("transcribe error: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok := <-audioCh:
+				if !ok {
+					return
+				}
+				select {
+				case backendCh <- chunk:
+				default:
+					// Buffer full (~30s) — drop oldest to make room
+					select {
+					case <-backendCh:
+					default:
+					}
+					backendCh <- chunk
+				}
 			}
 		}
 	}()
 
-	// Type out text as it arrives
-	for text := range textCh {
-		d.typist.Type(text)
+	backoff := 500 * time.Millisecond
+	maxBackoff := 10 * time.Second
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		backend, err := NewBackend(d.cfg)
+		if err != nil {
+			log.Printf("backend init: %v", err)
+			return
+		}
+
+		textCh := make(chan string, 32)
+
+		// Run backend transcription
+		done := make(chan error, 1)
+		go func() {
+			defer close(textCh)
+			done <- backend.Transcribe(ctx, backendCh, textCh)
+		}()
+
+		// Type out text as it arrives
+		for text := range textCh {
+			d.typist.Type(text)
+			backoff = 500 * time.Millisecond // reset backoff on success
+		}
+
+		err = <-done
+		if ctx.Err() != nil {
+			return // normal shutdown via toggle
+		}
+		if err == nil {
+			return // clean finish (e.g. transcription.done)
+		}
+
+		log.Printf("transcribe error (retrying in %v): %v", backoff, err)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return
+		}
+		backoff = min(backoff*2, maxBackoff)
 	}
 }

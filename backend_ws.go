@@ -130,7 +130,7 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 		case "transcription.done":
 			return nil
 		case "error":
-			log.Printf("ws error event: %+v", ev)
+			log.Printf("ws error event: %s", data)
 		}
 	}
 }
