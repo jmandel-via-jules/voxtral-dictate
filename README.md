@@ -50,6 +50,11 @@ i3 keybinding
                               │  └────┬─────┘                    │
                               │       │ []byte chunks            │
                               │  ┌────▼──────┐                   │
+                              │  │ VAD       │ energy-based       │
+                              │  │ (bursts)  │ connect on speech  │
+                              │  └────┬──────┘                   │
+                              │       │ speech bursts            │
+                              │  ┌────▼──────┐                   │
                               │  │ Backend   │ WebSocket / HTTP  │
                               │  │ (STT)     │ to model server   │
                               │  └────┬──────┘                   │
@@ -88,6 +93,17 @@ sample_rate = 16000   # Must be 16000 for Voxtral
 chunk_ms = 480        # Audio chunk size (480ms recommended for Realtime)
 device = ""           # ALSA/PipeWire device name; empty = system default mic
 ```
+
+### `[audio.vad]`
+```toml
+enabled = true        # Energy-based voice activity detection
+threshold = 200       # RMS energy threshold (silence ~50-100, speech ~500-5000)
+pre_buffer_chunks = 3 # Chunks kept before speech onset (~1.4s at 480ms)
+trail_chunks = 21     # Chunks after speech stops before disconnecting (~10s)
+```
+
+When enabled, audio is split into speech bursts. Each burst gets its own backend
+connection — silence means no connection and no API billing.
 
 ### `[typing]`
 ```toml
@@ -281,6 +297,7 @@ ffmpeg -i input.mp3 -ar 16000 -ac 1 -f s16le output.pcm
 main.go              — CLI entry point (daemon | toggle | test)
 config.go            — TOML config loading with defaults
 daemon.go            — Unix socket listener, session lifecycle
+vad.go               — Voice activity detection, burst-based speech segmentation
 audio.go             — Mic capture via pw-record/arecord subprocess
 typist.go            — Text injection (xdotool/ydotool/wtype/dotool)
 backend.go           — Backend interface + factory

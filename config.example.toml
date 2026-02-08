@@ -8,6 +8,13 @@ sample_rate = 16000
 chunk_ms = 480        # 480ms chunks (recommended for Voxtral Realtime)
 device = ""           # ALSA/PipeWire device; empty = default
 
+# Voice Activity Detection — skip sending silent audio to save API costs
+[audio.vad]
+enabled = true
+threshold = 200       # RMS energy threshold (speech ~500-5000, silence ~50-100)
+pre_buffer_chunks = 3 # chunks to keep before speech onset (~1.4s at 480ms)
+trail_chunks = 21     # chunks to keep after speech stops (~10s at 480ms)
+
 [typing]
 method = "xdotool"   # xdotool | ydotool | wtype | dotool
 

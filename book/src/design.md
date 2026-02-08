@@ -116,20 +116,45 @@ if it isn't already running, and kills it on shutdown (only if we started it).
 than requiring users to set up a separate service, the dictate daemon manages it
 transparently. If ydotoold is already running (e.g. via systemd), we leave it alone.
 
+### 9. Voice Activity Detection (VAD) — burst-based architecture
+
+**Decision:** Energy-based VAD splits audio into speech bursts. Each burst gets
+its own WebSocket connection. Silence = no connection = no billing.
+
+**Why:**
+- Mistral Realtime API bills at $0.006/min for the duration of the connection
+- Streaming silence with keepalives still maintains a billable session
+- Burst-based approach: connect on speech onset, disconnect after trailing silence
+- Pre-buffer ring (3 chunks, ~1.4s) preserves word onsets that precede VAD trigger
+- Trailing grace period (21 chunks, ~10s) avoids thrashing on natural pauses
+
+**How it works:**
+- `vadBursts()` returns a `<-chan (<-chan []byte)` — a channel of burst channels
+- Each burst channel opens when speech is detected (RMS energy > threshold) and
+  closes after the trailing silence period expires
+- `handleBurst()` connects a backend per burst, with retry/backoff within the burst
+- When VAD is disabled, a single passthrough burst covers the entire session
+
 ## Data Flow
 
 ```
 Session start (toggle ON):
   1. Daemon creates context with cancel
   2. Spawns Recorder goroutine → audioCh (chan []byte)
-  3. Spawns Backend.Transcribe goroutine: audioCh → textCh (chan string)
-  4. Main loop reads textCh, calls Typist.Type() for each fragment
+  3. VAD splits audioCh into speech bursts (chan of chans)
+  4. For each burst:
+     a. Connect backend (WebSocket)
+     b. Stream audio → textCh (chan string)
+     c. Type text as it arrives
+     d. On burst end (trailing silence), disconnect backend
+  5. Wait for next burst...
 
 Session stop (toggle OFF):
   1. Cancel context
   2. Recorder subprocess gets killed, audioCh closes
-  3. Backend sees closed audioCh or cancelled context, textCh closes
-  4. Main loop exits, session goroutines are cleaned up
+  3. VAD closes, all burst channels close
+  4. Backend sees closed channel or cancelled context, disconnects
+  5. Session goroutines are cleaned up
 ```
 
 ## Audio Format
@@ -165,8 +190,6 @@ the full chunk (several seconds of speech at once).
 
 ## Future Improvements
 
-- **Voice Activity Detection (VAD):** Add Silero VAD or energy-based detection
-  so the llamacpp backend only sends audio that contains speech
 - **Audio feedback:** Play a short beep/tone on toggle to confirm start/stop
 - **i3bar/waybar integration:** ~~Show dictation status in the status bar~~
   Done — see `contrib/bumblebee-dictate.py` for bumblebee-status module

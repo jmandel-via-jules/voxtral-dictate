@@ -146,34 +146,40 @@ func (d *Daemon) runSession(ctx context.Context) {
 		return
 	}
 
-	// Fan-out audio: recorder -> backendCh (current backend consumes this)
-	// Buffer ~30s of audio (at 480ms chunks = ~63 chunks) to survive reconnects.
-	backendCh := make(chan []byte, 64)
+	// VAD splits audio into speech bursts. Each burst is a channel that
+	// opens on speech onset and closes after trailing silence. We connect
+	// a backend per burst, so silence = no connection = no billing.
+	bursts := vadBursts(ctx, audioCh, d.cfg.Audio.VAD)
+
+	for burst := range bursts {
+		if ctx.Err() != nil {
+			return
+		}
+		d.handleBurst(ctx, burst)
+	}
+}
+
+func (d *Daemon) handleBurst(ctx context.Context, audioCh <-chan []byte) {
+	backoff := 500 * time.Millisecond
+	maxBackoff := 10 * time.Second
+
+	// Buffer to survive reconnects within a burst
+	bufCh := make(chan []byte, 64)
 	go func() {
-		for {
+		defer close(bufCh)
+		for chunk := range audioCh {
 			select {
-			case <-ctx.Done():
-				return
-			case chunk, ok := <-audioCh:
-				if !ok {
-					return
-				}
+			case bufCh <- chunk:
+			default:
+				// Buffer full — drop oldest
 				select {
-				case backendCh <- chunk:
+				case <-bufCh:
 				default:
-					// Buffer full (~30s) — drop oldest to make room
-					select {
-					case <-backendCh:
-					default:
-					}
-					backendCh <- chunk
 				}
+				bufCh <- chunk
 			}
 		}
 	}()
-
-	backoff := 500 * time.Millisecond
-	maxBackoff := 10 * time.Second
 
 	for {
 		if ctx.Err() != nil {
@@ -188,27 +194,47 @@ func (d *Daemon) runSession(ctx context.Context) {
 
 		textCh := make(chan string, 32)
 
-		// Run backend transcription
 		done := make(chan error, 1)
 		go func() {
 			defer close(textCh)
-			done <- backend.Transcribe(ctx, backendCh, textCh)
+			done <- backend.Transcribe(ctx, bufCh, textCh)
 		}()
 
-		// Type out text as it arrives
-		for text := range textCh {
-			d.typist.Type(text)
-			backoff = 500 * time.Millisecond // reset backoff on success
+		midLine := false
+		endLine := func() {
+			if midLine {
+				fmt.Fprintln(os.Stderr)
+				midLine = false
+			}
 		}
+
+		for {
+			select {
+			case text, ok := <-textCh:
+				if !ok {
+					endLine()
+					goto done
+				}
+				d.typist.Type(text)
+				if !midLine {
+					fmt.Fprintf(os.Stderr, "%s transcribed:", time.Now().Format("2006/01/02 15:04:05"))
+					midLine = true
+				}
+				fmt.Fprint(os.Stderr, text)
+				backoff = 500 * time.Millisecond
+			}
+		}
+	done:
 
 		err = <-done
 		if ctx.Err() != nil {
-			return // normal shutdown via toggle
+			return
 		}
 		if err == nil {
-			return // clean finish (e.g. transcription.done)
+			return // burst ended cleanly (VAD closed the channel)
 		}
 
+		endLine()
 		log.Printf("transcribe error (retrying in %v): %v", backoff, err)
 		select {
 		case <-time.After(backoff):

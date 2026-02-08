@@ -20,9 +20,17 @@ type DaemonConfig struct {
 }
 
 type AudioConfig struct {
-	SampleRate int    `toml:"sample_rate"`
-	ChunkMs    int    `toml:"chunk_ms"`
-	Device     string `toml:"device"`
+	SampleRate int       `toml:"sample_rate"`
+	ChunkMs    int       `toml:"chunk_ms"`
+	Device     string    `toml:"device"`
+	VAD        VADConfig `toml:"vad"`
+}
+
+type VADConfig struct {
+	Enabled     bool    `toml:"enabled"`
+	Threshold   float64 `toml:"threshold"`
+	PreBufferN  int     `toml:"pre_buffer_chunks"`
+	TrailChunks int     `toml:"trail_chunks"`
 }
 
 type TypingConfig struct {
@@ -54,7 +62,16 @@ type LlamaCppConfig struct {
 func defaultConfig() *Config {
 	return &Config{
 		Daemon: DaemonConfig{Socket: "/tmp/dictate.sock"},
-		Audio:  AudioConfig{SampleRate: 16000, ChunkMs: 480},
+		Audio: AudioConfig{
+			SampleRate: 16000,
+			ChunkMs:    480,
+			VAD: VADConfig{
+				Enabled:     true,
+				Threshold:   200,
+				PreBufferN:  3,
+				TrailChunks: 21, // ~10s trailing silence before disconnecting
+			},
+		},
 		Typing: TypingConfig{Method: "xdotool"},
 		Backend: BackendConfig{
 			Name: "mistral-realtime",

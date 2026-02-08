@@ -46,7 +46,10 @@ func (b *WebSocketBackend) Transcribe(ctx context.Context, audioCh <-chan []byte
 	if err != nil {
 		return fmt.Errorf("ws dial %s: %w", b.url, err)
 	}
-	defer conn.CloseNow()
+	defer func() {
+		conn.CloseNow()
+		log.Printf("WebSocket disconnected from %s", b.url)
+	}()
 
 	// Increase read limit for large responses
 	conn.SetReadLimit(10 * 1024 * 1024)
