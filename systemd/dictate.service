@@ -7,8 +7,6 @@ Type=simple
 ExecStart=%h/hobby/voxtral-dictate/dictate daemon
 Restart=on-failure
 RestartSec=2
-# Uncomment and set your API key if using Mistral cloud backends:
-# Environment=MISTRAL_API_KEY=your-key-here
 
 [Install]
 WantedBy=default.target
