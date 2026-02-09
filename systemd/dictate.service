@@ -1,13 +1,14 @@
 [Unit]
 Description=voxtral-dictate daemon
-After=network.target
+After=graphical-session.target
 
 [Service]
 Type=simple
-User=exedev
-ExecStart=/home/exedev/dictate/dictate daemon
+ExecStart=%h/hobby/voxtral-dictate/dictate daemon
 Restart=on-failure
 RestartSec=2
+# Uncomment and set your API key if using Mistral cloud backends:
+# Environment=MISTRAL_API_KEY=your-key-here
 
 [Install]
 WantedBy=default.target

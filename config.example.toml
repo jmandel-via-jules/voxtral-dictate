@@ -43,6 +43,23 @@ model = "mistralai/Voxtral-Mini-4B-Realtime-2602"
 url = "http://localhost:8080/v1/chat/completions"
 chunk_seconds = 3    # accumulate audio then send
 
+# Session indicators — visual/hardware feedback when dictation is active
+# Multiple indicators can be enabled simultaneously
+[[indicator]]
+type = "led"
+led_number = 0           # /proc/acpi/ibm/led number (0=power)
+mode = "blink"           # "on" or "blink"
+
+# [[indicator]]
+# type = "dunstify"
+# message = "Dictating..."
+# urgency = "critical"    # low | normal | critical
+
+# [[indicator]]
+# type = "command"
+# start_cmd = "echo 1 > /sys/class/leds/platform::micmute/brightness"
+# stop_cmd = "echo 0 > /sys/class/leds/platform::micmute/brightness"
+
 # --- Model server setup (not managed by dictate, run separately) ---
 #
 # OPTION A: Voxtral Mini 3B via llama.cpp (smallest, runs on CPU or weak GPU)

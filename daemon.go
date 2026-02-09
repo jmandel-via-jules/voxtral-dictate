@@ -13,17 +13,19 @@ import (
 )
 
 type Daemon struct {
-	cfg     *Config
-	typist  *Typist
-	mu      sync.Mutex
-	active  bool
-	cancel  context.CancelFunc // cancels current dictation session
+	cfg        *Config
+	typist     *Typist
+	indicators *IndicatorSet
+	mu         sync.Mutex
+	active     bool
+	cancel     context.CancelFunc // cancels current dictation session
 }
 
 func runDaemon(cfg *Config) {
 	d := &Daemon{
-		cfg:    cfg,
-		typist: NewTypist(cfg.Typing),
+		cfg:        cfg,
+		typist:     NewTypist(cfg.Typing),
+		indicators: NewIndicatorSet(cfg.Indicator),
 	}
 
 	// Clean up stale socket
@@ -49,6 +51,7 @@ func runDaemon(cfg *Config) {
 		<-sigCh
 		log.Println("Shutting down...")
 		d.stopDictation()
+		d.indicators.Close()
 		d.typist.Close()
 		ln.Close()
 	}()
@@ -116,6 +119,7 @@ func (d *Daemon) startDictation() {
 	d.cancel = cancel
 	d.mu.Unlock()
 
+	d.indicators.On()
 	go d.runSession(ctx)
 }
 
@@ -128,6 +132,7 @@ func (d *Daemon) stopDictation() {
 		d.cancel = nil
 	}
 	d.active = false
+	d.indicators.Off()
 }
 
 func (d *Daemon) runSession(ctx context.Context) {
@@ -136,6 +141,7 @@ func (d *Daemon) runSession(ctx context.Context) {
 		d.active = false
 		d.cancel = nil
 		d.mu.Unlock()
+		d.indicators.Off()
 		log.Println("Session ended")
 	}()
 

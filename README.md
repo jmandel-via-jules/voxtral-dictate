@@ -19,8 +19,13 @@ cp config.example.toml ~/.config/dictate/config.toml
 # Edit config.toml — see detailed comments inside
 
 # Start a model server (pick one, see "Model Servers" below)
-# Then start the daemon:
-./dictate daemon &
+
+# Run the daemon as a systemd user service (recommended):
+mkdir -p ~/.config/systemd/user
+cp systemd/dictate.service ~/.config/systemd/user/
+# Edit ExecStart path in the service file to match your install location
+systemctl --user daemon-reload
+systemctl --user enable --now dictate
 
 # Test toggle:
 ./dictate toggle   # → "started" (recording + transcribing)
@@ -28,11 +33,6 @@ cp config.example.toml ~/.config/dictate/config.toml
 
 # Add to i3 config (~/.config/i3/config):
 bindsym $mod+d exec /path/to/dictate toggle
-
-# Or run as a systemd user service:
-cp systemd/dictate.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now dictate
 ```
 
 ## Architecture
@@ -104,6 +104,43 @@ trail_chunks = 21     # Chunks after speech stops before disconnecting (~10s)
 
 When enabled, audio is split into speech bursts. Each burst gets its own backend
 connection — silence means no connection and no API billing.
+
+### `[[indicator]]`
+
+Visual/hardware feedback when dictation is active. Multiple indicators can be
+enabled simultaneously.
+
+```toml
+# ThinkPad LED blink (needs write access to /proc/acpi/ibm/led)
+[[indicator]]
+type = "led"
+led_number = 0        # 0=power LED
+mode = "blink"        # "on" or "blink"
+
+# Desktop notification via dunstify
+[[indicator]]
+type = "dunstify"
+message = "Dictating..."
+urgency = "critical"  # low | normal | critical
+
+# Arbitrary shell commands
+[[indicator]]
+type = "command"
+start_cmd = "echo 1 > /sys/class/leds/platform::micmute/brightness"
+stop_cmd = "echo 0 > /sys/class/leds/platform::micmute/brightness"
+```
+
+**ThinkPad LED permissions:** The `led` type writes to `/proc/acpi/ibm/led`,
+which is root-only by default. Set up a udev rule for persistent access:
+
+```bash
+sudo tee /etc/udev/rules.d/99-thinkpad-led.rules <<'EOF'
+ACTION=="add", SUBSYSTEM=="leds", DEVPATH=="*tpacpi*", RUN+="/bin/chmod 0666 /proc/acpi/ibm/led"
+EOF
+sudo udevadm control --reload-rules
+# Apply immediately (takes effect on next boot automatically):
+sudo chmod 0666 /proc/acpi/ibm/led
+```
 
 ### `[typing]`
 ```toml
@@ -222,12 +259,13 @@ Set `backend.name = "mistral-realtime"` for streaming or `"mistral-batch"` for c
 Add to `~/.config/i3/config`:
 
 ```bash
-# Start dictate daemon on login
-exec --no-startup-id /path/to/dictate daemon
-
 # Toggle dictation with $mod+` (backtick)
 bindsym $mod+grave exec --no-startup-id /path/to/dictate toggle
 ```
+
+The daemon itself should be managed by systemd (see below), not started
+from the i3 config. This gives you automatic restarts, proper logging,
+and clean shutdown.
 
 ### Status bar indicator (bumblebee-status)
 
@@ -253,32 +291,41 @@ If you use `method = "ydotool"` for text injection, the daemon will
 automatically start `ydotoold` if it isn't already running, and stop it on
 daemon exit (only if the daemon started it). No separate setup needed.
 
-## systemd Units
+## systemd User Service (recommended)
 
-Sample units in `systemd/`:
+Running the daemon as a systemd user service is the recommended approach.
+You get automatic restarts on crash, proper log capture via `journalctl`,
+and the daemon starts automatically on login.
+
+```bash
+# Install the service
+mkdir -p ~/.config/systemd/user
+cp systemd/dictate.service ~/.config/systemd/user/
+# Edit ExecStart path and Environment as needed:
+#   nano ~/.config/systemd/user/dictate.service
+
+# Enable and start
+systemctl --user daemon-reload
+systemctl --user enable --now dictate
+
+# Check status / logs
+systemctl --user status dictate
+journalctl --user -u dictate -f    # tail logs
+journalctl --user -u dictate -e    # jump to end
+```
+
+After rebuilding the binary (`go build -o dictate .`), restart with:
+```bash
+systemctl --user restart dictate
+```
+
+Sample units for model servers are also provided in `systemd/`:
 
 | File | Purpose |
 |---|---|
 | `dictate.service` | The dictation daemon itself |
 | `llamacpp.service` | llama.cpp model server (edit for model size) |
 | `vllm-voxtral.service` | vLLM model server (edit for model variant) |
-
-Install as system services:
-```bash
-sudo cp systemd/*.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now llamacpp   # or vllm-voxtral
-sudo systemctl enable --now dictate
-```
-
-Or as user services:
-```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/*.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now llamacpp
-systemctl --user enable --now dictate
-```
 
 ## Testing
 
@@ -297,6 +344,7 @@ ffmpeg -i input.mp3 -ar 16000 -ac 1 -f s16le output.pcm
 main.go              — CLI entry point (daemon | toggle | test)
 config.go            — TOML config loading with defaults
 daemon.go            — Unix socket listener, session lifecycle
+indicator.go         — Session indicators (LED, dunstify, command)
 vad.go               — Voice activity detection, burst-based speech segmentation
 audio.go             — Mic capture via pw-record/arecord subprocess
 typist.go            — Text injection (xdotool/ydotool/wtype/dotool)

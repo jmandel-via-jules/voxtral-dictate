@@ -9,10 +9,24 @@ import (
 )
 
 type Config struct {
-	Daemon DaemonConfig           `toml:"daemon"`
-	Audio  AudioConfig            `toml:"audio"`
-	Typing TypingConfig           `toml:"typing"`
-	Backend BackendConfig         `toml:"backend"`
+	Daemon    DaemonConfig      `toml:"daemon"`
+	Audio     AudioConfig       `toml:"audio"`
+	Typing    TypingConfig      `toml:"typing"`
+	Backend   BackendConfig     `toml:"backend"`
+	Indicator []IndicatorConfig `toml:"indicator"`
+}
+
+type IndicatorConfig struct {
+	Type      string `toml:"type"`       // "led", "dunstify", "command"
+	// LED options
+	LEDNumber int    `toml:"led_number"` // /proc/acpi/ibm/led number (0=power)
+	Mode      string `toml:"mode"`       // "on" or "blink"
+	// Dunstify options
+	Message   string `toml:"message"`
+	Urgency   string `toml:"urgency"`    // low | normal | critical
+	// Command options
+	StartCmd  string `toml:"start_cmd"`
+	StopCmd   string `toml:"stop_cmd"`
 }
 
 type DaemonConfig struct {

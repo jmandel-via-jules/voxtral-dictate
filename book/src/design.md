@@ -135,6 +135,26 @@ its own WebSocket connection. Silence = no connection = no billing.
 - `handleBurst()` connects a backend per burst, with retry/backoff within the burst
 - When VAD is disabled, a single passthrough burst covers the entire session
 
+### 10. Session indicators
+
+**Decision:** Pluggable indicator system with LED, dunstify, and command backends.
+Multiple indicators can be active simultaneously.
+
+**Why:**
+- Users need visual feedback that dictation is active (especially with VAD, where
+  silence doesn't mean "stopped")
+- ThinkPad LED blink is zero-overhead hardware feedback — no screen space used
+- Different setups need different feedback: desktop notifications for floating WMs,
+  LEDs for minimal setups, arbitrary commands for anything else
+- Same interface pattern as `Backend` and `Typist`: config-driven, multiple impls
+
+**How it works:**
+- `IndicatorSet` wraps multiple `Indicator` implementations, fans out `On()`/`Off()`/`Close()`
+- `On()` called in `startDictation()`, `Off()` in `stopDictation()` and `runSession()` defer
+- LED type: saves brightness state via sysfs, writes blink/on/off to `/proc/acpi/ibm/led`
+- Dunstify type: persistent notification with fixed replace ID, closed on stop
+- Command type: arbitrary `sh -c` on start/stop
+
 ## Data Flow
 
 ```
@@ -191,6 +211,7 @@ the full chunk (several seconds of speech at once).
 ## Future Improvements
 
 - **Audio feedback:** Play a short beep/tone on toggle to confirm start/stop
+  (visual feedback is now available via `[[indicator]]` — LED blink, dunstify, commands)
 - **i3bar/waybar integration:** ~~Show dictation status in the status bar~~
   Done — see `contrib/bumblebee-dictate.py` for bumblebee-status module
 - **Streaming for llamacpp:** llama.cpp may eventually get a proper
